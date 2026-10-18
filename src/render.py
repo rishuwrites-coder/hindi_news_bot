@@ -5,7 +5,7 @@ from visuals import *
 def render(headline, lines, audio, times, out, tmp):
     scenes = []; state = {"used": set(), "credits": []}
     for i, (ln, (a, b)) in enumerate(zip(lines, times)):
-        p = f"{tmp}/s{i}.mp4"; scene_video(ln["visual"], b - a, p, tmp, state, i, ln.get("visual_fallback", "")); scenes.append(p)
+        p = f"{tmp}/s{i}.mp4"; scene_video(ln["visual"], b - a, p, tmp, state, i, ln.get("visual_fallback", ""), ln.get("person", "")); scenes.append(p)
     open(f"{tmp}/c.txt", "w").write("".join(f"file '{os.path.abspath(p)}'\n" for p in scenes))
     bg = f"{tmp}/bg.mp4"
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", f"{tmp}/c.txt", "-c", "copy", bg], check=True)

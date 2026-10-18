@@ -74,7 +74,7 @@ def commons_images(query):
     """Real photos from Wikimedia Commons (free, no key)."""
     r = requests.get("https://commons.wikimedia.org/w/api.php", headers=UA, timeout=30, params={
         "action": "query", "format": "json", "generator": "search", "gsrsearch": query + " filetype:bitmap",
-        "gsrnamespace": 6, "gsrlimit": 15, "prop": "imageinfo", "iiprop": "url|size|mime|extmetadata", "iiurlwidth": 1600}).json()
+        "gsrnamespace": 6, "gsrlimit": 15, "prop": "imageinfo", "iiprop": "url|size|mime|extmetadata", "iiurlwidth": 1280}).json()
     out = []
     for pg in (r.get("query", {}).get("pages", {}) or {}).values():
         ii = (pg.get("imageinfo") or [{}])[0]
@@ -85,6 +85,11 @@ def commons_images(query):
         credit = f'{_clean(md.get("Artist", {}).get("value", "Unknown"))[:60]} / Wikimedia Commons ({_clean(md.get("LicenseShortName", {}).get("value", "CC"))})'
         out.append({"url": ii.get("thumburl") or ii["url"], "credit": credit, "id": pg.get("title")})
     return out
+
+def person_images(name):
+    """Only photos whose Commons file title contains every word of the name (avoids 'Tiger Shroff' -> tiger)."""
+    toks = [t.lower() for t in re.findall(r"\w+", name) if len(t) > 1]
+    return [c for c in commons_images(f'"{name}"') if all(t in (c["id"] or "").lower() for t in toks)]
 
 def openverse_images(query):
     r = requests.get("https://api.openverse.org/v1/images/", headers=UA, timeout=30,
@@ -104,7 +109,7 @@ def compose_still(imgpath, out):
         fg = im.resize((int(im.width * 900 / im.height), 900)); l = (fg.width - W) // 2; fg = fg.crop((l, 0, l + W, 900))
     else:
         fg = im.resize((W, int(im.height * fr)))
-        if fg.height > 1100: t = (fg.height - 1100) // 2; fg = fg.crop((0, t, W, t + 1100))
+        if fg.height > 1100: t = int((fg.height - 1100) * 0.2); fg = fg.crop((0, t, W, t + 1100))
     canvas.paste(fg, (0, 560 + (1100 - fg.height) // 2 if fg.height < 1100 else 560))
     canvas.save(out, quality=92)
 
@@ -115,15 +120,37 @@ def still_clip(png, seconds, path, idx):
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-loop", "1", "-i", png, "-vf", vf, "-frames:v", str(n),
                     "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-an", path], check=True)
 
+_last = [0.0]
 def _download(url, path):
-    r = requests.get(url, headers=UA, timeout=60); r.raise_for_status()
-    if len(r.content) < 5000: raise ValueError("tiny image")
-    open(path, "wb").write(r.content)
+    import time
+    for attempt in range(4):
+        wait = 1.5 - (time.time() - _last[0])
+        if wait > 0: time.sleep(wait)
+        r = requests.get(url, headers=UA, timeout=60); _last[0] = time.time()
+        if r.status_code == 429:
+            d = min(int(r.headers.get("Retry-After", 5) or 5), 20); print(f"  429 on image, waiting {d}s"); time.sleep(d); continue
+        r.raise_for_status()
+        if len(r.content) < 5000: raise ValueError("tiny image")
+        open(path, "wb").write(r.content); return
+    raise RuntimeError("image download rate-limited")
 
-def scene_video(query, seconds, path, tmp, state, idx=0, fallback=""):
+def scene_video(query, seconds, path, tmp, state, idx=0, fallback="", person=""):
     base = ["ffmpeg", "-y", "-loglevel", "error"]
     enc = ["-t", f"{seconds:.3f}", "-r", str(FPS), "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-an", path]
     queries = [q for q in (query, fallback, "India") if q]
+    # 0) verified photo of the public figure the line is about
+    if person:
+        try:
+            for c in person_images(person)[:3]:
+                if c["id"] in state["used"]: continue
+                raw, png = f"{tmp}/img{idx}.raw", f"{tmp}/img{idx}.jpg"
+                try: _download(c["url"], raw); compose_still(raw, png)
+                except Exception as e: print("  img fail", str(e)[:100]); continue
+                still_clip(png, seconds, path, idx); state["used"].add(c["id"]); state["credits"].append(c["credit"])
+                print(f"  scene {idx}: person photo '{person}'"); return
+            print(f"  no verified photo for '{person}', using place visual")
+        except Exception as e:
+            print("  person search fail", str(e)[:120])
     # 1) stock video if keys exist
     src = f"{tmp}/{os.path.basename(path)}.src.mp4"
     for q in queries[:2]:
@@ -139,7 +166,7 @@ def scene_video(query, seconds, path, tmp, state, idx=0, fallback=""):
     for q in queries:
         for fn in (commons_images, openverse_images):
             try:
-                for c in fn(q)[:8]:
+                for c in fn(q)[:4]:
                     if c["id"] in state["used"]: continue
                     raw, png = f"{tmp}/img{idx}.raw", f"{tmp}/img{idx}.jpg"
                     try:
