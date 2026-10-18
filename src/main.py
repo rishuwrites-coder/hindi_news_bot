@@ -24,11 +24,11 @@ print("   headline:", data.get("headline"))
 print("3/5 voice"); audio, times = synth_lines(lines, tmp)
 name = f"output/short_{int(time.time())}"
 
-print("4/5 render"); render(data.get("headline", chosen["title"]), lines, audio, times, name + ".mp4", tmp)
+print("4/5 render"); credits = render(data.get("headline", chosen["title"]), lines, audio, times, name + ".mp4", tmp)
 
 print("5/5 metadata")
 json.dump({"title": data.get("title", chosen["title"]),
-           "description": data.get("description", "") + f"\n\nस्रोत: {chosen['link']}",
+           "description": data.get("description", "") + f"\n\nस्रोत: {chosen['link']}" + ("\n\nImages: " + "; ".join(sorted(set(credits))) if credits else ""),
            "source": chosen["link"]}, open(name + ".json", "w"), ensure_ascii=False, indent=2)
 mark_used(chosen["link"])
 print("done", name, f"({times[-1][1]:.1f}s)")
