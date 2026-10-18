@@ -15,6 +15,23 @@ def _edge(text, path):
     import edge_tts
     asyncio.run(edge_tts.Communicate(text, EDGE_VOICE, rate="+8%").save(path))
 
+def _gtts(text, path):  # last-resort free fallback (works from cloud IPs)
+    from gtts import gTTS
+    gTTS(text=text, lang="hi", tld="co.in").save(path)
+
+def _one(text, path):
+    engines = []
+    if os.getenv("ELEVENLABS_API_KEY"): engines.append(("elevenlabs", _eleven))
+    engines += [("edge-tts", _edge), ("gtts", _gtts)]
+    for name, fn in engines:
+        try:
+            fn(text, path)
+            if os.path.getsize(path) > 1000:
+                return name
+        except Exception as e:
+            print(f"  TTS {name} failed: {type(e).__name__}: {str(e)[:200]}")
+    raise SystemExit("All TTS engines failed")
+
 def dur(path):
     return float(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration",
                                           "-of", "csv=p=0", path]).decode())
@@ -24,11 +41,7 @@ def synth_lines(lines, outdir):
     paths = []
     for i, ln in enumerate(lines):
         p = f"{outdir}/l{i}.mp3"
-        try:
-            if os.getenv("ELEVENLABS_API_KEY"): _eleven(ln["text"], p)
-            else: raise RuntimeError
-        except Exception:
-            _edge(ln["text"], p)
+        eng = _one(ln["text"], p); print(f"  line {i}: {eng}")
         paths.append(p)
     times, t = [], 0.0
     for p in paths:

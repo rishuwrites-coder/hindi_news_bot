@@ -41,17 +41,34 @@ def header_png(headline, path):
     d.text((50, 1700), CHANNEL_NAME, font=font(60), fill=(255, 255, 255), stroke_width=4, stroke_fill=(0, 0, 0))
     im.save(path)
 
-def stock_clip(query, path):
+def _pexels(query, path):
     key = os.getenv("PEXELS_API_KEY")
     if not key: return False
-    try:
-        r = requests.get("https://api.pexels.com/videos/search", headers={"Authorization": key},
-                         params={"query": query, "orientation": "portrait", "per_page": 5}, timeout=30).json()
-        for v in r.get("videos", []):
-            files = sorted([f for f in v["video_files"] if f.get("width") and f["width"] >= 720], key=lambda f: f["width"])
-            if files:
-                open(path, "wb").write(requests.get(files[0]["link"], timeout=120).content); return True
-    except Exception: pass
+    r = requests.get("https://api.pexels.com/videos/search", headers={"Authorization": key},
+                     params={"query": query, "orientation": "portrait", "per_page": 5}, timeout=30).json()
+    for v in r.get("videos", []):
+        files = sorted([f for f in v["video_files"] if f.get("width") and f["width"] >= 720], key=lambda f: f["width"])
+        if files:
+            open(path, "wb").write(requests.get(files[0]["link"], timeout=120).content); return True
+    return False
+
+def _pixabay(query, path):
+    key = os.getenv("PIXABAY_API_KEY")
+    if not key: return False
+    r = requests.get("https://pixabay.com/api/videos/", params={"key": key, "q": query, "per_page": 5, "safesearch": "true"}, timeout=30).json()
+    for v in r.get("hits", []):
+        for size in ("medium", "large", "small"):
+            u = v["videos"].get(size, {}).get("url")
+            if u:
+                open(path, "wb").write(requests.get(u, timeout=120).content); return True
+    return False
+
+def stock_clip(query, path):
+    for fn in (_pexels, _pixabay):
+        try:
+            if fn(query, path): return True
+        except Exception as e:
+            print("stock fail", fn.__name__, e)
     return False
 
 def scene_video(query, seconds, path, tmp):
